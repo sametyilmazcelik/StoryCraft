@@ -2,36 +2,54 @@ import fs from 'fs';
 import path from 'path';
 import { execSync } from 'child_process';
 import { ScenePlan } from '@storycraft/core';
+import { Communicate } from 'edge-tts-universal';
+import ffmpegPath from 'ffmpeg-static';
 
-async function generateTTS(text: string, outputPath: string) {
-    console.log(`Generating TTS for: "${text.substring(0, 30)}..."`);
-    // Using edge-tts CLI as requested
-    const command = `edge-tts --voice tr-TR-EmelNeural --text "${text.replace(/"/g, '\\"')}" --write-media "${outputPath}"`;
-    execSync(command);
+if (!ffmpegPath) {
+    throw new Error('FFmpeg binary could not be found.');
 }
 
-function generateSRT(plan: ScenePlan, outputPath: string) {
-    let srtContent = '';
-    let currentTime = 0;
+async function generateTTS(text: string, audioPath: string): Promise<string> {
+    console.log(`Generating Word-Synced TTS for: "${text.substring(0, 30)}..."`);
+    const communicate = new Communicate(text, { voice: 'tr-TR-EmelNeural' });
+    const fileStream = fs.createWriteStream(audioPath);
+    const words: { start: number; end: number; text: string }[] = [];
 
-    plan.scenes.forEach((scene, index) => {
-        const startTime = formatSRTTime(currentTime);
-        currentTime += scene.duration;
-        const endTime = formatSRTTime(currentTime);
+    // 1 unit = 100ns = 0.0000001s
+    const UNIT_TO_SEC = 0.0000001;
 
-        srtContent += `${index + 1}\n${startTime} --> ${endTime}\n${scene.text}\n\n`;
+    for await (const chunk of communicate.stream()) {
+        if (chunk.type === 'audio' && chunk.data) {
+            fileStream.write(chunk.data);
+        } else if (chunk.type === 'WordBoundary' && chunk.text) {
+            words.push({
+                text: chunk.text,
+                start: (chunk.offset || 0) * UNIT_TO_SEC,
+                end: ((chunk.offset || 0) + (chunk.duration || 0)) * UNIT_TO_SEC
+            });
+        }
+    }
+
+    await new Promise<void>((resolve, reject) => {
+        fileStream.on('finish', () => resolve());
+        fileStream.on('error', reject);
+        fileStream.end();
     });
 
-    fs.writeFileSync(outputPath, srtContent);
+    // Generate SRT from words
+    let srt = '';
+    for (let i = 0; i < words.length; i++) {
+        const word = words[i];
+        srt += `${i + 1}\n${formatSRTTime(word.start)} --> ${formatSRTTime(word.end)}\n${word.text}\n\n`;
+    }
+    return srt;
 }
 
 function formatSRTTime(seconds: number): string {
-    const date = new Date(0);
-    date.setSeconds(seconds);
-    const hh = date.getUTCHours().toString().padStart(2, '0');
-    const mm = date.getUTCMinutes().toString().padStart(2, '0');
-    const ss = date.getUTCSeconds().toString().padStart(2, '0');
-    const ms = (seconds % 1).toFixed(3).substring(2).padStart(3, '0');
+    const hh = Math.floor(seconds / 3600).toString().padStart(2, '0');
+    const mm = Math.floor((seconds % 3600) / 60).toString().padStart(2, '0');
+    const ss = Math.floor(seconds % 60).toString().padStart(2, '0');
+    const ms = Math.floor((seconds % 1) * 1000).toString().padStart(3, '0');
     return `${hh}:${mm}:${ss},${ms}`;
 }
 
@@ -43,44 +61,66 @@ async function renderPipeline(jobId: string) {
     const outputDir = path.join(jobDir, 'output');
     if (!fs.existsSync(outputDir)) fs.mkdirSync(outputDir, { recursive: true });
 
-    // 1. Generate full audio and SRT
+    // 1. Generate Synchronized TTS and SRT
     const fullText = plan.scenes.map(s => s.text).join(' ');
     const audioPath = path.join(outputDir, 'voice.mp3');
     const srtPath = path.join(outputDir, 'subtitles.srt');
 
-    await generateTTS(fullText, audioPath);
-    generateSRT(plan, srtPath);
+    const srtContent = await generateTTS(fullText, audioPath);
+    fs.writeFileSync(srtPath, srtContent);
 
-    // 2. FFmpeg Rendering
-    console.log('Starting FFmpeg render...');
-    const videoOutputPath = path.join(outputDir, 'video.mp4');
+    // 2. FFmpeg Rendering (Enhanced Animations)
+    console.log('Starting Enhanced Render (Dynamic Camera + Synced Subtitles)...');
+    const finalVideoPath = path.join(outputDir, 'video_storycraft.mp4');
+    const srtPathSafe = srtPath.replace(/\\/g, '/').replace(/:/g, '\\:');
 
-    // Build FFmpeg complex filter for image sequence with durations
-    // For simplicity in MVP, we create a concat script for pictures or use a simpler approach
+    // Impactful Subtitle Style: Bold, Yellow, Center-aligned
+    const subtitleStyle = "FontSize=24,PrimaryColour=&H0000FFFF,OutlineColour=&H00000000,BorderStyle=1,Outline=1,Alignment=2,MarginV=60,FontName=Arial,Bold=1";
+
     const inputs: string[] = [];
-    const filterComplex: string[] = [];
+    const filterParts: string[] = [];
 
-    let totalDuration = 0;
     plan.scenes.forEach((scene, i) => {
         const imgPath = path.join(jobDir, 'images', scene.image);
         inputs.push(`-loop 1 -t ${scene.duration} -i "${imgPath}"`);
-        filterComplex.push(`[${i}:v]scale=1080:1920:force_original_aspect_ratio=increase,crop=1080:1920,setsar=1[v${i}];`);
-        totalDuration += scene.duration;
+
+        // Dynamic Camera Movements (Randomized per scene)
+        const effects = [
+            `zoompan=z='min(zoom+0.001,1.5)':d=${scene.duration * 30}:s=1080x1920:fps=30`, // Zoom In
+            `zoompan=z='1.5-0.001*on':d=${scene.duration * 30}:s=1080x1920:fps=30`,        // Zoom Out
+            `zoompan=z=1.2:x='if(lte(on,-1),0,x+0.5)':d=${scene.duration * 30}:s=1080x1920:fps=30`, // Pan Right
+            `zoompan=z=1.2:x='if(lte(on,-1),0,x-0.5)':d=${scene.duration * 30}:s=1080x1920:fps=30`  // Pan Left
+        ];
+        const effect = effects[i % effects.length];
+
+        filterParts.push(`[${i}:v]scale=2160:3840,${effect},setsar=1[v${i}];`);
     });
 
     const concatFilter = plan.scenes.map((_, i) => `[v${i}]`).join('') + `concat=n=${plan.scenes.length}:v=1:a=0[outv]`;
+    const burnSubtitlesFilter = `[outv]subtitles='${srtPathSafe}':force_style='${subtitleStyle}'[finalv]`;
 
-    const ffmpegCmd = `ffmpeg -y ${inputs.join(' ')} -i "${audioPath}" -filter_complex "${filterComplex.join('')}${concatFilter}" -map "[outv]" -map ${plan.scenes.length}:a -c:v libx264 -pix_fmt yuv420p -r 30 -shortest "${videoOutputPath}"`;
+    const ffmpegCmd = `"${ffmpegPath}" -y ${inputs.join(' ')} -i "${audioPath}" -filter_complex "${filterParts.join('')}${concatFilter};${burnSubtitlesFilter}" -map "[finalv]" -map ${plan.scenes.length}:a -c:v libx264 -pix_fmt yuv420p -r 30 -shortest "${finalVideoPath}"`;
 
+    console.log('Executing FFmpeg V2...');
     execSync(ffmpegCmd);
 
-    // 3. Add Subtitles (Optional second pass or combined - doing second pass for simplicity)
-    const finalVideoPath = path.join(outputDir, 'final_video.mp4');
-    const subtitleCmd = `ffmpeg -y -i "${videoOutputPath}" -vf "subtitles='${srtPath.replace(/\\/g, '/')}'" -c:a copy "${finalVideoPath}"`;
-    execSync(subtitleCmd);
+    console.log(`Video ready for Instagram: ${finalVideoPath}`);
 
-    console.log(`Render complete: ${finalVideoPath}`);
+    // 4. Update status
+    fs.writeFileSync(path.join(jobDir, "status.json"), JSON.stringify({
+        status: "completed",
+        completedAt: new Date().toISOString(),
+        videoPath: `/api/video/${jobId}`,
+        fileName: 'video_storycraft.mp4'
+    }));
 }
 
 const jobId = process.argv[2] || 'job1';
-renderPipeline(jobId).catch(console.error);
+renderPipeline(jobId).catch(err => {
+    console.error(err);
+    const jobDir = path.join(process.cwd(), '..', 'storage', 'jobs', jobId);
+    fs.writeFileSync(path.join(jobDir, "status.json"), JSON.stringify({
+        status: "error",
+        error: err.message
+    }));
+});

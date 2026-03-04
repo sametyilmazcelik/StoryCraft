@@ -18,33 +18,22 @@ A local-first, zero-cost storytelling video generator.
 
 ## Kurulum
 
-1. Depoyu klonlayın:
-   ```bash
-   git clone https://github.com/USERNAME/storycraft.git
-   cd storycraft
-   ```
-
+1. Depoyu klonlayın ve klasöre girin.
 2. Bağımlılıkları yükleyin:
    ```bash
    npm install
    ```
 
-3. Gereksinimler:
-   - FFmpeg (Sisteminizde yüklü olmalı)
-   - Edge TTS (`pip install edge-tts`)
-
 ## Kullanım
 
-1. Frontend'i başlatın:
+1. Sistemi başlatın:
    ```bash
    npm run web
    ```
 
-2. `/create` sayfasından hikayenizi oluşturun.
+2. `/create` sayfasından hikayenizi oluşturun. "Üret" dediğinizde yönlendirildiğiniz `/jobs` sayfasından süreci takip edebilirsiniz.
 
-3. Worker'ı Manuel Tetikleyin:
-   ```bash
-   npm run worker -w worker job1
-   ```
+> [!IMPORTANT]
+> Sistem artık tamamen taşınabilirdir. FFmpeg veya Python yüklemenize gerek yoktur; tüm araçlar proje bağımlılığı olarak otomatik gelir.
 
 4. Çıktı: `storage/jobs/job1/output/final_video.mp4`
