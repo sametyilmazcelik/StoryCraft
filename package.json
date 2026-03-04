@@ -1,0 +1,13 @@
+{
+  "name": "storycraft",
+  "private": true,
+  "workspaces": [
+    "apps/*",
+    "worker",
+    "packages/*"
+  ],
+  "scripts": {
+    "web": "npm run dev -w apps/web",
+    "worker": "npm run start -w worker"
+  }
+}

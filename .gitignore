@@ -1,0 +1,15 @@
+node_modules
+.next
+dist
+.env
+.env.local
+
+*.mp4
+*.wav
+*.mp3
+
+storage/jobs/*
+!storage/jobs/.gitkeep
+
+assets/images/*
+!assets/images/.gitkeep
