@@ -22,6 +22,8 @@ export default function CreatePage() {
         { text: "Bazen sadece durmak gerekir.", image: null },
         { text: "Dünyanın gürültüsünden uzaklaşmak için.", image: null }
     ]);
+    const [bgMusic, setBgMusic] = useState<File | null>(null);
+    const [musicMood, setMusicMood] = useState<string>("cinematic");
     const [loading, setLoading] = useState(false);
 
     const handleSplitStory = async () => {
@@ -59,32 +61,59 @@ export default function CreatePage() {
         }
     };
 
+    const [imageProgress, setImageProgress] = useState("");
+
     const handleGenerateImages = async () => {
         if (scenes.length === 0) return;
         setIsGeneratingImages(true);
-        try {
-            const newScenes = [...scenes];
-            for (let i = 0; i < newScenes.length; i++) {
-                const scene = newScenes[i];
-                if (scene.prompt) {
-                    const pollinationUrl = `https://image.pollinations.ai/prompt/${encodeURIComponent(scene.prompt)}?width=1080&height=1920&nologo=true&seed=${Math.floor(Math.random() * 100000)}`;
+        const newScenes = [...scenes];
+        let successCount = 0;
 
+        for (let i = 0; i < newScenes.length; i++) {
+            const scene = newScenes[i];
+            if (!scene.prompt) continue;
+
+            setImageProgress(`Sahne ${i + 1}/${newScenes.length} üretiliyor... (AI Sunucusu)`);
+
+            try {
+                const res = await fetch("/api/generate-image", {
+                    method: "POST",
+                    headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify({ prompt: scene.prompt, index: i })
+                });
+
+                const data = await res.json();
+
+                if (data.success && data.url) {
+                    const providerInfo = data.provider === 'pollinations' ? 'Pollinations' : 'AI Horde';
+                    setImageProgress(`✅ Sahne ${i + 1} üretildi (${providerInfo})`);
                     newScenes[i] = {
                         ...scene,
-                        imagePreview: pollinationUrl,
+                        imagePreview: data.url,
                         image: null
                     };
                     setScenes([...newScenes]);
-                    // Add a small delay between requests to avoid rate limits
-                    await new Promise(r => setTimeout(r, 500));
+                    successCount++;
+                    // Short pause to show the checkmark
+                    await new Promise(r => setTimeout(r, 1000));
+                } else {
+                    console.warn(`Sahne ${i + 1} üretilemedi:`, data.error);
+                    setImageProgress(`⚠️ Sahne ${i + 1} atlandı: ${data.error}`);
+                    await new Promise(r => setTimeout(r, 2000));
                 }
+            } catch (err: any) {
+                console.error(`Sahne ${i + 1} hata:`, err);
+                setImageProgress(`⚠️ Sahne ${i + 1} atlandı: Servise bağlanılamadı.`);
+                await new Promise(r => setTimeout(r, 2000));
             }
-        } catch (err) {
-            console.error(err);
-        } finally {
-            setIsGeneratingImages(false);
         }
+
+        setImageProgress(successCount > 0 ? `✅ ${successCount} görsel başarıyla üretildi!` : "❌ Hiçbir görsel üretilemedi. Servisler şu an çok yoğun.");
+        setIsGeneratingImages(false);
+
+        setTimeout(() => setImageProgress(""), 5000);
     };
+
 
     const addScene = () => {
         setScenes([...scenes, { text: "", image: null }]);
@@ -129,6 +158,11 @@ export default function CreatePage() {
                     formData.append(`image_${i}`, s.image);
                 }
             });
+
+            if (bgMusic) {
+                formData.append("bgMusic", bgMusic);
+            }
+            formData.append("musicMood", musicMood);
 
             const response = await fetch("/api/render", {
                 method: "POST",
@@ -219,6 +253,70 @@ export default function CreatePage() {
                                     {isGeneratingImages ? "Üretiliyor..." : "🎨 Görselleri Otomatik Üret"}
                                 </button>
                             </div>
+                            {imageProgress && (
+                                <div className="mt-3 px-4 py-3 bg-slate-950/70 border border-white/10 rounded-2xl">
+                                    <div className="flex items-center gap-3">
+                                        {isGeneratingImages && (
+                                            <span className="w-4 h-4 border-2 border-purple-400/30 border-t-purple-400 rounded-full animate-spin shrink-0" />
+                                        )}
+                                        <span className="text-sm text-slate-300">{imageProgress}</span>
+                                    </div>
+                                </div>
+                            )}
+                        </div>
+                    </section>
+
+                    <section className="bg-slate-900/50 backdrop-blur-xl border border-white/5 p-8 rounded-3xl shadow-2xl space-y-4">
+                        <div className="flex justify-between items-center mb-2">
+                            <label className="block text-xs font-bold uppercase tracking-widest text-pink-400">Arkaplan Müziği Seç (Opsiyonel)</label>
+                        </div>
+                        <div className="flex items-center gap-4">
+                            <div className="flex-1 bg-slate-950/50 border border-white/10 rounded-2xl p-4 flex items-center justify-between group hover:border-pink-500/30 transition-all cursor-pointer relative">
+                                <span className={`text-sm ${bgMusic ? 'text-pink-300 font-bold' : 'text-slate-500'}`}>
+                                    {bgMusic ? `🎵 ${bgMusic.name}` : "🎧 Sahnene uygun telifsiz bir MP3 seç..."}
+                                </span>
+                                <input
+                                    type="file"
+                                    accept="audio/mpeg,audio/mp3"
+                                    onChange={(e) => setBgMusic(e.target.files?.[0] || null)}
+                                    className="absolute inset-0 opacity-0 cursor-pointer w-full h-full"
+                                />
+                                {bgMusic && (
+                                    <button
+                                        onClick={(e) => { e.preventDefault(); e.stopPropagation(); setBgMusic(null); }}
+                                        className="relative z-10 text-slate-500 hover:text-red-400 p-1"
+                                    >
+                                        ✕
+                                    </button>
+                                )}
+                            </div>
+                        </div>
+                        <p className="text-[10px] text-slate-500">Müzik yüklenirse ses düzeyi otomatik %12'ye kısılarak seslendirmeye eşlik edecek şekilde karıştırılacaktır.</p>
+
+                        <div>
+                            <label className="block text-xs font-bold uppercase tracking-widest text-pink-300 mb-3">Müziğin Duygusu</label>
+                            <div className="flex flex-wrap gap-2">
+                                {([
+                                    { key: 'cinematic', label: '🎬 Sinematik', color: 'purple' },
+                                    { key: 'sad', label: '😢 Hüzünlü', color: 'blue' },
+                                    { key: 'happy', label: '😄 Mutlu', color: 'yellow' },
+                                    { key: 'energetic', label: '⚡ Enerjik', color: 'orange' },
+                                    { key: 'suspense', label: '😨 Gerilim', color: 'red' },
+                                ] as const).map(({ key, label }) => (
+                                    <button
+                                        key={key}
+                                        type="button"
+                                        onClick={() => setMusicMood(key)}
+                                        className={`px-4 py-2 rounded-xl text-xs font-bold border transition-all ${musicMood === key
+                                            ? 'bg-pink-600 border-pink-500 text-white shadow-lg shadow-pink-500/20'
+                                            : 'bg-slate-950/50 border-white/10 text-slate-400 hover:border-pink-500/40 hover:text-pink-300'
+                                            }`}
+                                    >
+                                        {label}
+                                    </button>
+                                ))}
+                            </div>
+                            <p className="text-[10px] text-slate-500 mt-2">Müzik yüklenmezse seçilen duyguya uygun bir parça otomatik indirilecektir.</p>
                         </div>
                     </section>
 
@@ -264,6 +362,13 @@ export default function CreatePage() {
                                             />
                                         </div>
                                         <div className="text-[10px] text-center text-slate-500 font-medium">Önerilen: 1080x1920 PNG</div>
+                                        <div className="mt-4 p-3 bg-blue-900/20 border border-blue-800/50 rounded-lg text-xs text-blue-300 flex items-center gap-2">
+                                            <span className="text-lg">💡</span>
+                                            <div>
+                                                <b>Pro İpucu:</b> Daha hızlı ve kaliteli görseller için <code>.env.local</code> dosyasına kendi API anahtarlarınızı ekleyebilirsiniz.
+                                                (Gemini & Pollinations)
+                                            </div>
+                                        </div>
                                     </div>
                                 </div>
                             </div>

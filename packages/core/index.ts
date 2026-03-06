@@ -8,4 +8,5 @@ export interface Scene {
 export interface ScenePlan {
   title: string;
   scenes: Scene[];
+  musicMood?: 'cinematic' | 'sad' | 'happy' | 'energetic' | 'suspense';
 }

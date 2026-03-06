@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
+import { GoogleGenerativeAI } from "@google/generative-ai";
 
 const POLLINATIONS_TEXT_URL = "https://text.pollinations.ai/";
 
@@ -10,36 +11,58 @@ export async function POST(req: NextRequest) {
             return NextResponse.json({ error: "Hikaye metni boş olamaz" }, { status: 400 });
         }
 
-        // Force a more granular output by asking for specific indices
-        const prompt = `
-        Aşağıdaki hikayeyi en az 3-5 mantıklı sahneye böl. 
-        Her bir sahne için seslendirme metni (${language === "tr" ? "Türkçe" : "İngilizce"}) ve detaylı bir görsel promptu (İngilizce) oluştur.
-        Süreler 4-8 saniye arası olsun.
-        
-        SADECE JSON DIZISI DÖNDÜR:
-        [
-          {"text": "...", "imagePrompt": "...", "duration": 5},
-          ...
-        ]
+        const systemInstruction = `Sen üst düzey bir dijital hikaye anlatıcısı ve video yönetmenisin. 
+Görevin: Hikayeleri görsel olarak etkileyici sahnelere bölmek.
+KRİTİK TALİMATLAR:
+1. Her sahne için "imagePrompt" kısmına bir görüntü yönetmeni gibi (Cinematographer) detaylı İngilizce görsel tarifler yaz. 
+2. Örn: "Cinematic medium shot of a weary jeweler's hands meticulously drilling a hole in a glowing golden gem, macro photography, dust motes dancing in sunbeams, workbench background".
+3. Duyguyu, ışığı ve dokuyu tasvir et.
+4. SADECE JSON DIZISI döndür: [{"text": "...", "imagePrompt": "...", "duration": 6}]`;
 
-        HİKAYE:
-        ${story}
-        `;
+        const userPrompt = `Aşağıdaki hikayeyi en az 3-6 mantıklı sahneye böl. 
+Sahneler ${language === "tr" ? "Türkçe" : "İngilizce"} olsun. 
+Görsel promptlar MUTLAKA İngilizce olsun.
 
-        const response = await fetch(POLLINATIONS_TEXT_URL, {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({
-                messages: [
-                    { role: "system", content: "Sen bir video yapım asistanısın. Görevin hikayeleri mantıklı parçalara bölmek ve sadece JSON döndürmektir." },
-                    { role: "user", content: prompt }
-                ],
-                seed: Math.floor(Math.random() * 1000000),
-                jsonMode: true
-            })
-        });
+HİKAYE:
+${story}`;
 
-        const result = await response.text();
+        let result = "";
+
+        const splitWithPollinations = async () => {
+            console.log("[split] Using free Pollinations Gemini proxy...");
+            const response = await fetch(POLLINATIONS_TEXT_URL, {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({
+                    messages: [
+                        { role: "system", content: systemInstruction },
+                        { role: "user", content: userPrompt }
+                    ],
+                    model: "gemini",
+                    seed: Math.floor(Math.random() * 1000000),
+                    jsonMode: true
+                })
+            });
+            return await response.text();
+        };
+
+        // Direct Gemini API Support (Higher quality/reliability)
+        const geminiApiKey = process.env.GEMINI_API_KEY;
+        if (geminiApiKey) {
+            try {
+                console.log("[split] Attempting direct Gemini API...");
+                const genAI = new GoogleGenerativeAI(geminiApiKey);
+                const model = genAI.getGenerativeModel({ model: "gemini-2.0-flash" });
+                const chatResponse = await model.generateContent(`${systemInstruction}\n\n${userPrompt}`);
+                result = chatResponse.response.text();
+            } catch (geminiError: any) {
+                console.error("[split] Direct Gemini Error (Quota likely):", geminiError.message);
+                // Trigger fallback if direct API fails
+                result = await splitWithPollinations();
+            }
+        } else {
+            result = await splitWithPollinations();
+        }
 
         let scenes: any[] = [];
         try {
@@ -51,15 +74,8 @@ export async function POST(req: NextRequest) {
             } else if (parsed.scenes && Array.isArray(parsed.scenes)) {
                 scenes = parsed.scenes;
             } else if (typeof parsed === 'object') {
-                // If it returns a single object but it's long, try to split the text
-                if (parsed.text && parsed.text.length > 100) {
-                    const parts = parsed.text.split(/[.!?]/).filter((s: string) => s.trim().length > 10);
-                    scenes = parts.map((p: string) => ({
-                        text: p.trim() + ".",
-                        imagePrompt: parsed.imagePrompt || "Cinematic atmosphere",
-                        duration: 5
-                    }));
-                } else {
+                if (parsed.text && parsed.text.length > 50) {
+                    // Single object breakdown
                     scenes = [parsed];
                 }
             }
@@ -72,14 +88,14 @@ export async function POST(req: NextRequest) {
             }
         }
 
-        // Advanced Fallback: If AI fails or returns 1 scene for a long text, manually split by sentences
+        // Advanced Fallback: If AI fails, use the text itself as the base for prompt
         if (!Array.isArray(scenes) || scenes.length <= 1) {
-            const sentences = story.split(/[.!?]/).map(s => s.trim()).filter(s => s.length > 5);
+            const sentences = story.split(/[.!?]/).map((s: string) => s.trim()).filter((s: string) => s.length > 10);
             if (sentences.length > 1) {
-                scenes = sentences.map(s => ({
+                scenes = sentences.map((s: string) => ({
                     text: s + ".",
-                    imagePrompt: "Cinematic, high detail, artistic style",
-                    duration: 5
+                    imagePrompt: `${s}, cinematic lighting, photorealistic, 8k, highly detailed`, // Simple fallback using the text itself
+                    duration: 6
                 }));
             }
         }

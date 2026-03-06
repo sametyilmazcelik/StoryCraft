@@ -13,3 +13,5 @@ storage/jobs/*
 
 assets/images/*
 !assets/images/.gitkeep
+
+apps/web/public/ai-images/*

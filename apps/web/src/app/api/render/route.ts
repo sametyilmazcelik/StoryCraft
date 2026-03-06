@@ -22,6 +22,12 @@ export async function POST(req: NextRequest) {
 
         const finalScenes: Scene[] = [];
 
+        const bgMusicFile = formData.get("bgMusic") as File | null;
+        if (bgMusicFile) {
+            const buffer = Buffer.from(await bgMusicFile.arrayBuffer());
+            fs.writeFileSync(path.join(jobDir, "bgMusic.mp3"), buffer);
+        }
+
         // Save images and build Scene objects
         for (let i = 0; i < scenes.length; i++) {
             const imageFile = formData.get(`image_${i}`) as File;
@@ -72,7 +78,8 @@ export async function POST(req: NextRequest) {
         }
 
         // Save plan.json
-        const plan: ScenePlan = { title, scenes: finalScenes };
+        const musicMood = (formData.get("musicMood") as string) || "cinematic";
+        const plan: ScenePlan = { title, scenes: finalScenes, musicMood: musicMood as ScenePlan["musicMood"] };
         fs.writeFileSync(path.join(jobDir, "plan.json"), JSON.stringify(plan, null, 2));
 
         // Initialize status.json
