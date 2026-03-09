@@ -1,0 +1,28 @@
+[
+  {
+    "id": "sr_1772938162990",
+    "title": "Gece vardiyası",
+    "currentEpisode": 3,
+    "globalContext": "\"Gece Vardiyası\" adlı bir mini dizi için 1. bölümü yaz.\n\nHikaye eski ve terk edilmiş bir otelde gece resepsiyon görevlisi olan Mert'in ilk gecesinde yaşadığı gizemli olayları anlatıyor.\n\nKurallar:\n- Hikaye kısa ve sahnelere bölünebilecek cümlelerden oluşsun.\n- İlk sahne çok güçlü bir hook olsun.\n- Atmosfer gizemli ve gerilim dolu olsun.\n- Hikaye 25-30 saniyelik video olacak şekilde yazılsın.\n- Son cümle güçlü bir cliffhanger olsun.",
+    "previousEpisodeSummary": "Oda 307'ye gel. Şimdi. Kim olduğunu sordum, sadece statik bir hışırtı duydum. Titreyen adımlarla koridora yöneldi. Her tıkırtı bir fısıltı gibiydi.",
+    "characterProfile": {
+      "name": "Mert",
+      "appearance": "A man in his late 20s, perhaps 28, with tired but alert blue eyes, short dark brown hair slightly dishevelled. He wears a plain, slightly wrinkled hotel uniform shirt with a nametag, dark trousers, and practical, comfortable shoes. His posture is often slightly hunched from long hours.",
+      "baseSeed": 71336498,
+      "id": "char_1772938413000"
+    }
+  },
+  {
+    "id": "sr_1772984848035",
+    "title": "Arabalar Türkiye'de",
+    "currentEpisode": 2,
+    "globalContext": "Arabalar çizgi filmini Türkiyeye uyarla. Çok trafik ve kavgalı bir ortam yap. Çizgi film görseli şeklinde olsun.",
+    "previousEpisodeSummary": "Bu şehir, beni bu beton labirentine sonsuza dek hapsedemez! Ama yine de, saatlerdir aynı yerdeyiz. Bir milim bile ilerlemeden. Korona sesleri, egzoz dumanı... Boğuluyorum bu karmaşada!",
+    "characterProfile": {
+      "name": "Hızlı Hasan",
+      "appearance": "A customized, slightly dented 1990s Fiat Şahin, painted a faded but vibrant turquoise with aggressive flame decals adorning its sides. It features oversized, chrome-plated wheels that are a bit too flashy for its age, and a subtly worn-out, aftermarket spoiler. Its rectangular headlights squint in perpetual exhaustion, like tired, world-weary eyes reflecting years of traffic. The grille seems to grimace in frustration, giving it the 'face' of a road-hardened individual. The car's overall demeanor suggests a personality of a longing 40-year-old, dreaming of open, unburdened roads.",
+      "baseSeed": 64412913,
+      "id": "char_1772984905963"
+    }
+  }
+]

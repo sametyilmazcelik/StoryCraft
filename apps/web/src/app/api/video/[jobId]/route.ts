@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import fs from "fs";
 import path from "path";
 
-export async function GET(req: NextRequest, { params }: { params: { jobId: string } }) {
+export async function GET(req: NextRequest, { params }: { params: Promise<{ jobId: string }> }) {
     const jobId = (await params).jobId;
     const outputDir = path.join(process.cwd(), "..", "..", "storage", "jobs", jobId, "output");
     let videoPath = path.join(outputDir, "video_storycraft.mp4");

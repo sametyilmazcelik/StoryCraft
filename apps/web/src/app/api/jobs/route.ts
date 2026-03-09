@@ -31,11 +31,11 @@ export async function GET() {
                 };
             });
 
-        // Sort by Date (newest first)
+        // Sort: 1. Processing jobs first, 2. Then by ID (timestamp) descending
         jobs.sort((a: any, b: any) => {
-            const dateA = a.startedAt || "";
-            const dateB = b.startedAt || "";
-            return dateB.localeCompare(dateA);
+            if (a.status === "processing" && b.status !== "processing") return -1;
+            if (a.status !== "processing" && b.status === "processing") return 1;
+            return b.id.localeCompare(a.id);
         });
 
         return NextResponse.json(jobs);

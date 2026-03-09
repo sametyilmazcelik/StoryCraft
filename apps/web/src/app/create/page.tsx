@@ -1,12 +1,14 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { useRouter } from "next/navigation";
 
-interface SceneInput {
+interface Scene {
     text: string;
     image: File | null;
     imagePreview?: string;
+    videoFile?: File | null;
+    videoPreview?: string;
     prompt?: string;
     duration?: number;
 }
@@ -18,13 +20,31 @@ export default function CreatePage() {
     const [language, setLanguage] = useState<"tr" | "en">("tr");
     const [isSplitting, setIsSplitting] = useState(false);
     const [isGeneratingImages, setIsGeneratingImages] = useState(false);
-    const [scenes, setScenes] = useState<SceneInput[]>([
+    const [scenes, setScenes] = useState<Scene[]>([
         { text: "Bazen sadece durmak gerekir.", image: null },
         { text: "Dünyanın gürültüsünden uzaklaşmak için.", image: null }
     ]);
     const [bgMusic, setBgMusic] = useState<File | null>(null);
     const [musicMood, setMusicMood] = useState<string>("cinematic");
+    const [voiceGender, setVoiceGender] = useState<"female" | "male">("female");
+    const [voiceTone, setVoiceTone] = useState<"normal" | "korku" | "eglenceli" | "surukleyici" | "ciddi">("normal");
+    const [imageStyle, setImageStyle] = useState<string>("Gerçekçi (Photorealistic)");
+    const [customImageStyle, setCustomImageStyle] = useState<string>("");
     const [loading, setLoading] = useState(false);
+    const [characterProfile, setCharacterProfile] = useState<any>(null);
+
+    // Series Mode States
+    const [seriesList, setSeriesList] = useState<any[]>([]);
+    const [selectedSeriesId, setSelectedSeriesId] = useState<string>("none");
+    const [newSeriesTitle, setNewSeriesTitle] = useState("");
+    const [newSeriesContext, setNewSeriesContext] = useState("");
+    const [isCreatingSeries, setIsCreatingSeries] = useState(false);
+
+    useEffect(() => {
+        fetch("/api/series").then(res => res.json()).then(data => {
+            if (data.success && data.series) setSeriesList(data.series);
+        }).catch(err => console.error("Series load error", err));
+    }, []);
 
     const handleSplitStory = async () => {
         if (!fullStory) {
@@ -33,9 +53,26 @@ export default function CreatePage() {
         }
         setIsSplitting(true);
         try {
+            const payload: any = { story: fullStory, language };
+            if (selectedSeriesId !== "none") {
+                const s = seriesList.find(x => x.id === selectedSeriesId);
+                if (s) {
+                    payload.seriesContext = s.globalContext;
+                    payload.previousEpisodeSummary = s.previousEpisodeSummary;
+                    payload.episodeNumber = s.currentEpisode;
+                }
+            }
+
+            if (imageStyle) {
+                payload.imageStyle = imageStyle === "Diğer (Özel)" ? "custom" : imageStyle;
+                if (imageStyle === "Diğer (Özel)") {
+                    payload.customImageStyle = customImageStyle;
+                }
+            }
+
             const res = await fetch("/api/split", {
                 method: "POST",
-                body: JSON.stringify({ story: fullStory, language })
+                body: JSON.stringify(payload)
             });
             const data = await res.json();
             if (data.success && Array.isArray(data.scenes)) {
@@ -47,6 +84,11 @@ export default function CreatePage() {
                     duration: s.duration || 5
                 }));
                 setScenes(newScenes);
+                if (data.characterProfile) {
+                    setCharacterProfile(data.characterProfile);
+                } else {
+                    setCharacterProfile(null);
+                }
                 if (newScenes.length > 0 && (!title || title === "Sükunet")) {
                     setTitle("Yapay Zeka Hikayesi");
                 }
@@ -79,7 +121,11 @@ export default function CreatePage() {
                 const res = await fetch("/api/generate-image", {
                     method: "POST",
                     headers: { "Content-Type": "application/json" },
-                    body: JSON.stringify({ prompt: scene.prompt, index: i })
+                    body: JSON.stringify({
+                        prompt: scene.prompt,
+                        index: i,
+                        characterProfile: characterProfile
+                    })
                 });
 
                 const data = await res.json();
@@ -114,6 +160,54 @@ export default function CreatePage() {
         setTimeout(() => setImageProgress(""), 5000);
     };
 
+    const handleRegenerateImage = async (index: number) => {
+        const scene = scenes[index];
+        if (!scene.prompt) {
+            alert("Bu sahne için resim metni (prompt) bulunmuyor. Önce hikayeyi sahneleri bölün.");
+            return;
+        }
+
+        setImageProgress(`Sahne ${index + 1} yeniden üretiliyor...`);
+        setIsGeneratingImages(true); // Reusing the same loading state block UI
+
+        try {
+            const res = await fetch("/api/generate-image", {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({
+                    prompt: scene.prompt,
+                    index: index,
+                    characterProfile: characterProfile,
+                    seed: Math.floor(Math.random() * 10000000) // Force new seed for regeneration
+                })
+            });
+
+            const data = await res.json();
+
+            if (data.success && data.url) {
+                const newScenes = [...scenes];
+                newScenes[index] = {
+                    ...scene,
+                    imagePreview: data.url,
+                    image: null
+                };
+                setScenes(newScenes);
+                setImageProgress(`✅ Sahne ${index + 1} başarıyla yenilendi!`);
+            } else {
+                alert(`Hata: ${data.error}`);
+                setImageProgress(`⚠️ Sahne ${index + 1} yenilenemedi.`);
+            }
+        } catch (err) {
+            console.error(err);
+            alert("Bağlantı hatası!");
+            setImageProgress(`⚠️ Sahne ${index + 1} yenilenemedi.`);
+        } finally {
+            setIsGeneratingImages(false);
+            setTimeout(() => setImageProgress(""), 4000);
+        }
+    };
+
+
 
     const addScene = () => {
         setScenes([...scenes, { text: "", image: null }]);
@@ -128,12 +222,63 @@ export default function CreatePage() {
     const handleImageChange = (index: number, file: File | null) => {
         const newScenes = [...scenes];
         newScenes[index].image = file;
+        newScenes[index].videoFile = null;
+        newScenes[index].videoPreview = undefined;
         setScenes(newScenes);
     };
 
+    const handleVideoChange = (index: number, file: File | null) => {
+        const newScenes = [...scenes];
+        newScenes[index].videoFile = file;
+        newScenes[index].image = null;
+        newScenes[index].imagePreview = undefined;
+        if (file) {
+            newScenes[index].videoPreview = URL.createObjectURL(file);
+        } else {
+            newScenes[index].videoPreview = undefined;
+        }
+        setScenes(newScenes);
+    };
+
+    useEffect(() => {
+        // Pre-fill form if jobId in URL for Editing Jobs
+        const urlParams = new URLSearchParams(window.location.search);
+        const editJobId = urlParams.get('jobId');
+        if (editJobId) {
+            fetch(`/api/jobs/${editJobId}/plan`)
+                .then(res => res.json())
+                .then(data => {
+                    if (data.success && data.plan) {
+                        const p = data.plan;
+                        setTitle(p.title || "Sükunet");
+                        setMusicMood(p.musicMood || "cinematic");
+                        if (p.voiceTone) setVoiceTone(p.voiceTone);
+                        if (p.imageStyle) setImageStyle(p.imageStyle);
+                        if (p.voiceGender) setVoiceGender(p.voiceGender);
+                        if (p.characterProfile) setCharacterProfile(JSON.stringify(p.characterProfile, null, 2));
+
+                        // Populate scenes with previous generated media
+                        if (p.scenes && p.scenes.length > 0) {
+                            const loadedScenes = p.scenes.map((s: any) => ({
+                                text: s.text,
+                                prompt: s.prompt,
+                                duration: s.duration,
+                                image: null,
+                                videoFile: null,
+                                imagePreview: s.image && s.image.endsWith('.png') ? `/api/jobs/${editJobId}/media/${s.image}` : undefined,
+                                videoPreview: s.videoPath && s.videoPath.endsWith('.mp4') ? `/api/jobs/${editJobId}/media/${s.videoPath}` : undefined,
+                            }));
+                            setScenes(loadedScenes);
+                        }
+                    }
+                })
+                .catch(err => console.error("Edit Job Load Error", err));
+        }
+    }, []);
+
     const handleSubmit = async () => {
-        if (scenes.some(s => (!s.image && !s.imagePreview) || !s.text)) {
-            alert("Lütfen tüm sahnelerin metinlerini ve görsellerini doldurun.");
+        if (scenes.some(s => (!s.image && !s.imagePreview && !s.videoFile && !s.videoPreview) || !s.text)) {
+            alert("Lütfen tüm sahnelerin metinlerini ve görsellerini/videolarını doldurun.");
             return;
         }
 
@@ -148,13 +293,15 @@ export default function CreatePage() {
                 text: s.text,
                 imageIndex: i,
                 duration: s.duration || 5,
-                imageUrl: s.imagePreview && !s.image ? s.imagePreview : undefined
+                imageUrl: s.videoPreview && !s.videoFile ? s.videoPreview : (s.imagePreview && !s.image ? s.imagePreview : undefined)
             }));
             formData.append("scenes", JSON.stringify(scenesMeta));
 
-            // Append images
+            // Append images and videos
             scenes.forEach((s, i) => {
-                if (s.image) {
+                if (s.videoFile) {
+                    formData.append(`video_${i}`, s.videoFile);
+                } else if (s.image) {
                     formData.append(`image_${i}`, s.image);
                 }
             });
@@ -163,6 +310,21 @@ export default function CreatePage() {
                 formData.append("bgMusic", bgMusic);
             }
             formData.append("musicMood", musicMood);
+            formData.append("voiceGender", voiceGender);
+            formData.append("voiceTone", voiceTone);
+            formData.append("imageStyle", imageStyle === "Diğer (Özel)" ? customImageStyle : imageStyle);
+
+            if (characterProfile) {
+                formData.append("characterProfile", JSON.stringify(characterProfile));
+            }
+
+            if (selectedSeriesId !== "none") {
+                const s = seriesList.find(x => x.id === selectedSeriesId);
+                if (s) {
+                    formData.append("seriesId", s.id);
+                    formData.append("episodeNumber", s.currentEpisode.toString());
+                }
+            }
 
             const response = await fetch("/api/render", {
                 method: "POST",
@@ -213,22 +375,131 @@ export default function CreatePage() {
                             />
                         </div>
 
+                        <div className="bg-purple-900/20 p-4 border border-purple-500/30 rounded-2xl">
+                            <label className="block text-xs font-bold uppercase tracking-widest text-purple-300 mb-2">🎬 Seri/Dizi Modu (Episodic Mode)</label>
+
+                            {!isCreatingSeries ? (
+                                <div className="space-y-3">
+                                    <select
+                                        value={selectedSeriesId}
+                                        onChange={(e) => setSelectedSeriesId(e.target.value)}
+                                        className="w-full bg-slate-950/50 border border-purple-500/30 rounded-xl p-3 text-sm text-slate-300 focus:outline-none focus:ring-2 focus:ring-purple-500/50"
+                                    >
+                                        <option value="none">-- Tekil Video Çalışması (Seri Yok) --</option>
+                                        {seriesList.map(s => (
+                                            <option key={s.id} value={s.id}>{s.title} (Sıradaki: Bölüm {s.currentEpisode})</option>
+                                        ))}
+                                    </select>
+                                    <button
+                                        onClick={() => setIsCreatingSeries(true)}
+                                        className="text-xs text-purple-400 font-bold hover:text-purple-300 underline"
+                                    >
+                                        + Yeni Dizi Evreni Yarat
+                                    </button>
+                                </div>
+                            ) : (
+                                <div className="space-y-3">
+                                    <input
+                                        type="text"
+                                        placeholder="Dizi Adı (Örn: Gece Vardiyası)"
+                                        value={newSeriesTitle}
+                                        onChange={(e) => setNewSeriesTitle(e.target.value)}
+                                        className="w-full bg-slate-950/50 border border-white/10 rounded-xl p-3 text-sm focus:outline-none focus:border-purple-500/50"
+                                    />
+                                    <textarea
+                                        placeholder="Evrenin Bağlamı (Örn: Tüm hikayeler lanetli bir oteldeki gece vardiyasında geçer. Karanlık ve gerilimli bir tondur...)"
+                                        value={newSeriesContext}
+                                        onChange={(e) => setNewSeriesContext(e.target.value)}
+                                        className="w-full bg-slate-950/50 border border-white/10 rounded-xl p-3 h-20 text-sm resize-none focus:outline-none focus:border-purple-500/50"
+                                    />
+                                    <div className="flex gap-2">
+                                        <button
+                                            onClick={async () => {
+                                                if (!newSeriesTitle || !newSeriesContext) return alert("Başlık ve Evren Bağlamı zorunludur.");
+                                                const res = await fetch("/api/series", {
+                                                    method: "POST", body: JSON.stringify({ title: newSeriesTitle, globalContext: newSeriesContext })
+                                                });
+                                                const data = await res.json();
+                                                if (data.success) {
+                                                    setSeriesList([...seriesList, data.series]);
+                                                    setSelectedSeriesId(data.series.id);
+                                                    setIsCreatingSeries(false);
+                                                }
+                                            }}
+                                            className="px-4 py-2 bg-purple-600 hover:bg-purple-500 rounded-lg text-xs font-bold transition-all text-white"
+                                        >
+                                            Evreni Kaydet
+                                        </button>
+                                        <button
+                                            onClick={() => setIsCreatingSeries(false)}
+                                            className="px-4 py-2 bg-slate-800 hover:bg-slate-700 rounded-lg text-xs text-white transition-all"
+                                        >
+                                            İptal
+                                        </button>
+                                    </div>
+                                </div>
+                            )}
+
+                            {selectedSeriesId !== "none" && !isCreatingSeries && (
+                                <div className="mt-3 p-3 bg-purple-950/50 rounded-lg text-xs text-purple-300/90 border border-purple-500/20 leading-relaxed">
+                                    <span className="text-lg mr-1 tracking-tighter">🧠</span> <b>Kalıcı Bellek Devrede:</b> Yapay zeka önceki bölümlerdeki olayları ({seriesList.find(s => s.id === selectedSeriesId)?.previousEpisodeSummary.substring(0, 30) || 'Hiç video üretilmedi'}...) hatırlayacak ve hikayeyi organik olarak devam ettirecektir.
+                                </div>
+                            )}
+                        </div>
+
                         <div>
-                            <div className="flex justify-between items-center mb-2">
-                                <label className="block text-xs font-bold uppercase tracking-widest text-blue-400">Yapay Zeka Hikaye Girişi</label>
-                                <div className="flex bg-slate-950/50 rounded-lg p-1 border border-white/5">
-                                    <button
-                                        onClick={() => setLanguage("tr")}
-                                        className={`px-3 py-1 text-[10px] font-bold rounded-md transition-all ${language === "tr" ? "bg-blue-600 text-white" : "text-slate-500 hover:text-slate-300"}`}
-                                    >
-                                        TÜRKÇE
-                                    </button>
-                                    <button
-                                        onClick={() => setLanguage("en")}
-                                        className={`px-3 py-1 text-[10px] font-bold rounded-md transition-all ${language === "en" ? "bg-blue-600 text-white" : "text-slate-500 hover:text-slate-300"}`}
-                                    >
-                                        ENGLISH
-                                    </button>
+                            <div className="flex flex-col md:flex-row justify-between items-start md:items-center mb-4 gap-4">
+                                <div className="space-y-1 w-full md:w-auto">
+                                    <label className="block text-xs font-bold uppercase tracking-widest text-blue-400">Seslendirme (Dil & Ton)</label>
+                                    <div className="flex flex-wrap items-center gap-2">
+                                        <div className="flex bg-slate-950/50 rounded-lg p-1 border border-white/5">
+                                            <button onClick={() => setVoiceGender("female")} className={`px-2 py-1 text-[10px] font-bold rounded-md transition-all ${voiceGender === "female" ? "bg-pink-600 text-white" : "text-slate-500 hover:text-slate-300"}`}>KADIN</button>
+                                            <button onClick={() => setVoiceGender("male")} className={`px-2 py-1 text-[10px] font-bold rounded-md transition-all ${voiceGender === "male" ? "bg-blue-600 text-white" : "text-slate-500 hover:text-slate-300"}`}>ERKEK</button>
+                                        </div>
+                                        <div className="flex bg-slate-950/50 rounded-lg p-1 border border-white/5">
+                                            <button onClick={() => setLanguage("tr")} className={`px-2 py-1 text-[10px] font-bold rounded-md transition-all ${language === "tr" ? "bg-purple-600 text-white" : "text-slate-500 hover:text-slate-300"}`}>TR</button>
+                                            <button onClick={() => setLanguage("en")} className={`px-2 py-1 text-[10px] font-bold rounded-md transition-all ${language === "en" ? "bg-purple-600 text-white" : "text-slate-500 hover:text-slate-300"}`}>EN</button>
+                                        </div>
+                                        <div className="flex bg-slate-950/50 rounded-lg p-1 border border-white/5">
+                                            <select
+                                                value={voiceTone}
+                                                onChange={(e) => setVoiceTone(e.target.value as any)}
+                                                className="bg-transparent text-[10px] font-bold text-slate-300 outline-none cursor-pointer px-1 w-32"
+                                            >
+                                                <option value="normal">Normal Ton</option>
+                                                <option value="surukleyici">Sürükleyici</option>
+                                                <option value="korku">Korku / Gerilim</option>
+                                                <option value="eglenceli">Eğlenceli</option>
+                                                <option value="ciddi">Ciddi / Belgesel</option>
+                                            </select>
+                                        </div>
+                                    </div>
+                                </div>
+                                <div className="space-y-1 w-full md:w-auto flex-1">
+                                    <label className="block text-xs font-bold uppercase tracking-widest text-purple-400">Görsel Stili</label>
+                                    <div className="flex flex-col gap-2">
+                                        <select
+                                            value={imageStyle}
+                                            onChange={(e) => setImageStyle(e.target.value)}
+                                            className="w-full bg-slate-950/50 border border-white/10 rounded-xl p-2 text-[10px] font-bold text-slate-300 focus:outline-none focus:border-purple-500/50 cursor-pointer"
+                                        >
+                                            <option value="Gerçekçi (Photorealistic)">Gerçekçi (Photorealistic)</option>
+                                            <option value="Çizgi Film (Cartoon)">Çizgi Film (Cartoon)</option>
+                                            <option value="Anime (Japon Tarzı)">Anime (Japon Tarzı)</option>
+                                            <option value="Karanlık Fantezi (Dark Fantasy)">Karanlık Fantezi (Dark Fantasy)</option>
+                                            <option value="3D Animasyon (Pixar Style)">3D Animasyon (Pixar Style)</option>
+                                            <option value="Diğer (Özel)">Diğer (Özel Format)</option>
+                                        </select>
+                                        {imageStyle === "Diğer (Özel)" && (
+                                            <input
+                                                type="text"
+                                                placeholder="İstediğiniz stili İngilizce yazın. Örn: cyberpunk coloring book style"
+                                                value={customImageStyle}
+                                                onChange={(e) => setCustomImageStyle(e.target.value)}
+                                                className="w-full bg-slate-950/50 border border-purple-500/50 rounded-xl p-2 text-xs outline-none"
+                                            />
+                                        )}
+                                    </div>
                                 </div>
                             </div>
                             <textarea
@@ -253,6 +524,15 @@ export default function CreatePage() {
                                     {isGeneratingImages ? "Üretiliyor..." : "🎨 Görselleri Otomatik Üret"}
                                 </button>
                             </div>
+
+                            {characterProfile && (
+                                <div className="mt-4 p-4 border border-blue-500/30 bg-blue-500/10 rounded-2xl">
+                                    <div className="text-xs font-bold text-blue-400 mb-1">🎭 {characterProfile.name || "Ana Karakter Algılandı"}</div>
+                                    <div className="text-sm text-slate-300 italic">{characterProfile.appearance}</div>
+                                    <div className="text-[10px] text-blue-500/70 mt-2 font-mono">Tüm sahnelerde stil kilitlendi (Seed: {characterProfile.baseSeed})</div>
+                                </div>
+                            )}
+
                             {imageProgress && (
                                 <div className="mt-3 px-4 py-3 bg-slate-950/70 border border-white/10 rounded-2xl">
                                     <div className="flex items-center gap-3">
@@ -302,6 +582,7 @@ export default function CreatePage() {
                                     { key: 'happy', label: '😄 Mutlu', color: 'yellow' },
                                     { key: 'energetic', label: '⚡ Enerjik', color: 'orange' },
                                     { key: 'suspense', label: '😨 Gerilim', color: 'red' },
+                                    { key: 'horror', label: '🦇 Korku', color: 'rose' },
                                 ] as const).map(({ key, label }) => (
                                     <button
                                         key={key}
@@ -341,8 +622,37 @@ export default function CreatePage() {
                                         />
                                     </div>
                                     <div className="md:w-64 space-y-4">
+                                        <div className="flex gap-2 mb-2">
+                                            <label className="flex-1 text-center py-2 bg-slate-950/50 border border-white/5 rounded-xl cursor-pointer hover:bg-slate-900 transition-all text-xs font-bold text-slate-400 hover:text-white">
+                                                🖼️ Görsel
+                                                <input
+                                                    type="file"
+                                                    accept="image/*"
+                                                    onChange={(e) => handleImageChange(index, e.target.files?.[0] || null)}
+                                                    className="hidden"
+                                                />
+                                            </label>
+                                            <label className="flex-1 text-center py-2 bg-slate-950/50 border border-white/5 rounded-xl cursor-pointer hover:bg-slate-900 transition-all text-xs font-bold text-slate-400 hover:text-white">
+                                                🎥 Video
+                                                <input
+                                                    type="file"
+                                                    accept="video/mp4,video/webm"
+                                                    onChange={(e) => handleVideoChange(index, e.target.files?.[0] || null)}
+                                                    className="hidden"
+                                                />
+                                            </label>
+                                        </div>
                                         <div className="aspect-video bg-slate-950/50 rounded-2xl border border-white/5 overflow-hidden flex items-center justify-center relative group-hover:border-purple-500/30 transition-all">
-                                            {scene.imagePreview || scene.image ? (
+                                            {scene.videoPreview ? (
+                                                <video
+                                                    src={scene.videoPreview}
+                                                    className="w-full h-full object-cover"
+                                                    controls
+                                                    autoPlay
+                                                    muted
+                                                    loop
+                                                />
+                                            ) : scene.imagePreview || scene.image ? (
                                                 <img
                                                     src={scene.imagePreview || (scene.image ? URL.createObjectURL(scene.image) : "")}
                                                     className="w-full h-full object-cover"
@@ -350,18 +660,24 @@ export default function CreatePage() {
                                                 />
                                             ) : (
                                                 <div className="text-center p-4">
-                                                    <div className="text-2xl mb-1">🖼️</div>
-                                                    <div className="text-[10px] uppercase tracking-widest text-slate-600 font-bold">Görsel Yükle</div>
+                                                    <div className="text-2xl mb-1">⬇️</div>
+                                                    <div className="text-[10px] uppercase tracking-widest text-slate-600 font-bold">Medya Yükle veya Üret</div>
                                                 </div>
                                             )}
-                                            <input
-                                                type="file"
-                                                accept="image/*"
-                                                onChange={(e) => handleImageChange(index, e.target.files?.[0] || null)}
-                                                className="absolute inset-0 opacity-0 cursor-pointer"
-                                            />
                                         </div>
-                                        <div className="text-[10px] text-center text-slate-500 font-medium">Önerilen: 1080x1920 PNG</div>
+                                        <div className="flex items-center justify-between mt-2">
+                                            <div className="text-[10px] text-slate-500 font-medium">Önerilen: 1080x1920 PNG</div>
+                                            {(scene.imagePreview || scene.prompt) && (
+                                                <button
+                                                    onClick={() => handleRegenerateImage(index)}
+                                                    disabled={isGeneratingImages}
+                                                    title="Yapay zekadan bu sahne için yeni bir alternatif üretmesini isteyin"
+                                                    className="p-1.5 bg-slate-800 hover:bg-purple-600/80 disabled:opacity-50 text-white rounded-lg transition-all text-xs flex items-center gap-1 group/btn"
+                                                >
+                                                    <span className="group-hover/btn:animate-spin">🔄</span> Yenile
+                                                </button>
+                                            )}
+                                        </div>
                                         <div className="mt-4 p-3 bg-blue-900/20 border border-blue-800/50 rounded-lg text-xs text-blue-300 flex items-center gap-2">
                                             <span className="text-lg">💡</span>
                                             <div>
@@ -398,6 +714,6 @@ export default function CreatePage() {
                     </button>
                 </footer>
             </div>
-        </div>
+        </div >
     );
 }
